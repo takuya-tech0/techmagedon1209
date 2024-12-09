@@ -227,6 +227,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       // バックエンドにメッセージを送信
+      // バックエンド側で初回メッセージ時にタイトル生成まで行い、レスポンスにtitleを含める実装が完了していることが前提
       final response = await _chatService.sendUserMessage(
         userMessage,
         conversationId: _currentConversationId,
@@ -256,16 +257,16 @@ class _ChatScreenState extends State<ChatScreen> {
       await _loadChatHistory();
       await _scrollToBottom();
 
-      // 初回メッセージの場合はタイトルを生成
-      if (_isFirstMessage && _currentConversationId != null) {
-        final title = await _chatService.generateTitle(_currentConversationId!);
+      // バックエンドからタイトルが返ってきた場合はisFirstMessageをfalseにする
+      if (response.containsKey('title')) {
         if (mounted) {
           setState(() {
-            _conversationTitle = title;
+            _conversationTitle = response['title'];
             _isFirstMessage = false;
           });
         }
       }
+
     } catch (e) {
       if (!mounted) return;
 
