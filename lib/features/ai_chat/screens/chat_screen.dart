@@ -1,5 +1,4 @@
 // lib/features/ai_chat/screens/chat_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../widgets/chat_bubble.dart';
@@ -27,13 +26,12 @@ class _ChatScreenState extends State<ChatScreen> {
   List<ChatHistory> _conversations = [];
   ChatHistory? _currentConversation;
   bool _isLoadingHistory = false;
-  String _conversationTitle = '無題の会話'; // タイトルを表示するための変数
-  int? _currentConversationId; // 追加: 会話IDを管理する変数
+  String _conversationTitle = '無題の会話';
+  int? _currentConversationId;
 
   @override
   void initState() {
     super.initState();
-    // .envからAPIキーを読み込み、ChatServiceに渡す
     _chatService = ChatService(apiKey: dotenv.env['OPENAI_API_KEY'] ?? '');
     _loadInitialMessage();
     _loadChatHistory();
@@ -103,9 +101,8 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _isLoading = true;
       _currentConversation = conversation;
-      _chatService.currentConversationId = conversation.conversationId; // 会話IDをセット
-      _currentConversationId = conversation.conversationId; // 追加: 会話IDをセット
-      _conversationTitle = conversation.title ?? '無題の会話'; // タイトルをセット
+      _currentConversationId = conversation.conversationId;
+      _conversationTitle = conversation.title ?? '無題の会話';
     });
 
     try {
@@ -198,7 +195,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     _messageController.text = recommendation;
-    _isFirstMessage = false;
     _sendMessage();
   }
 
@@ -217,49 +213,58 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_messageController.text.isEmpty) return;
 
     final userMessage = _messageController.text;
-
-    if (!mounted) return;
+    _messageController.clear();
 
     setState(() {
       _messages.add(ChatMessage(
         content: userMessage,
         isUser: true,
       ));
-      _messageController.clear();
       _isLoading = true;
-      // _isFirstMessage = false; // この行をコメントアウトまたは削除
     });
 
     await _scrollToBottom();
 
     try {
-      // 既存機能であるsendMessageメソッドを利用
-      final response = await _chatService.sendMessage(userMessage, _isFirstMessage);
+      // バックエンドにメッセージを送信
+      final response = await _chatService.sendUserMessage(
+        userMessage,
+        conversationId: _currentConversationId,
+        isFirstMessage: _isFirstMessage,
+      );
 
       if (!mounted) return;
 
+      // 会話IDの更新
+      _currentConversationId = response['conversation_id'];
+
+      // バックエンドから返された最新の応答を表示
       setState(() {
         _messages.add(ChatMessage(
-          content: response['content'],
+          content: response['assistant_message'],
           isUser: false,
-          recommendations: List<String>.from(response['recommendations']),
+          recommendations: _chatService.getCurrentRecommendations(
+            _isFirstMessage,
+            userMessage,
+          ),
           isFirstMessage: _isFirstMessage,
         ));
         _isLoading = false;
       });
 
-      // 会話履歴を再取得して更新
+      // 履歴を更新
       await _loadChatHistory();
-
       await _scrollToBottom();
 
-      // タイトル生成のトリガー
-      if (_isFirstMessage) {
-        final title = await _chatService.fetchGeneratedTitle(_currentConversationId!);
-        setState(() {
-          _conversationTitle = title;
-        });
-        _isFirstMessage = false;
+      // 初回メッセージの場合はタイトルを生成
+      if (_isFirstMessage && _currentConversationId != null) {
+        final title = await _chatService.generateTitle(_currentConversationId!);
+        if (mounted) {
+          setState(() {
+            _conversationTitle = title;
+            _isFirstMessage = false;
+          });
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -275,60 +280,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
     }
-  }
-
-  Widget _buildChatInput() {
-    return Container(
-      padding: const EdgeInsets.all(16.0),
-      color: Colors.white,
-      child: SafeArea(
-        top: false,
-        child: Row(
-          children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFE4E8),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: TextField(
-                  controller: _messageController,
-                  decoration: InputDecoration(
-                    hintText: 'メッセージ',
-                    hintStyle: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 14,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                  onSubmitted: (_) => _sendMessage(),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_upward),
-                onPressed: _sendMessage,
-                color: Colors.purple,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildHeader() {
@@ -399,6 +350,60 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Widget _buildChatInput() {
+    return Container(
+      padding: const EdgeInsets.all(16.0),
+      color: Colors.white,
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFE4E8),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: TextField(
+                  controller: _messageController,
+                  decoration: InputDecoration(
+                    hintText: 'メッセージ',
+                    hintStyle: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                  ),
+                  style: const TextStyle(fontSize: 14),
+                  onSubmitted: (_) => _sendMessage(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.arrow_upward),
+                onPressed: _sendMessage,
+                color: Colors.purple,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -407,10 +412,9 @@ class _ChatScreenState extends State<ChatScreen> {
           setState(() {
             _currentConversation = null;
             _messages.clear();
-            _chatService.currentConversationId = null; // 会話IDをリセット
-            _currentConversationId = null; // 追加: 会話IDをリセット
-            _conversationTitle = '無題の会話'; // タイトルをリセット
-            _isFirstMessage = true; // フラグをリセット
+            _currentConversationId = null;
+            _conversationTitle = '無題の会話';
+            _isFirstMessage = true;
           });
           _loadInitialMessage();
           return false;
@@ -427,23 +431,20 @@ class _ChatScreenState extends State<ChatScreen> {
           isLoading: _isLoadingHistory,
           currentConversation: _currentConversation,
         ),
-        body: Container(
-          color: Colors.white,
-          child: SafeArea(
-            child: Column(
-              children: [
-                _buildHeader(),
-                _buildChatList(),
-                if (_isLoading)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8.0),
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.purple),
-                    ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(),
+              _buildChatList(),
+              if (_isLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.purple),
                   ),
-                _buildChatInput(),
-              ],
-            ),
+                ),
+              _buildChatInput(),
+            ],
           ),
         ),
       ),
